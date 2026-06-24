@@ -21,6 +21,14 @@ client — think BlueMap, but for StarMade's galaxy.
   StarMadeDock for a newer version and logs the result. Non-blocking and best-effort; failures are
   ignored (StarMadeDock is behind Cloudflare and may be unreachable from a server).
 
+## Roadmap
+
+Planned features:
+
+- **Fix partial and transparent blocks** — correct rendering of non-full blocks (wedges, corners,
+  etc.) and proper transparency for glass and similar materials.
+- **BlueMap-style first-person fly view** — a free-fly first-person camera mode like BlueMap's.
+
 ## Architecture
 
 ```
