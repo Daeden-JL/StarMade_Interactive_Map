@@ -72,6 +72,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     seedMockPreviewData(renderer, ui);
   }
 
+  // Restore the last selected object from the cookie (now that entities exist)
+  ui.restoreSelection();
+
   // 5. Initialize WebSocket Client for real-time telemetry (player & dynamic ship movements)
   const wsClient = new WebSocketClient(
     (update) => {

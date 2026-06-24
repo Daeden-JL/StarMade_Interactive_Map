@@ -1,4 +1,9 @@
-import { GalaxyEntity, GalaxyRenderer } from '../renderer/GalaxyRenderer.ts';
+import { GalaxyEntity, GalaxyRenderer, RenderMode } from '../renderer/GalaxyRenderer.ts';
+import { getCookie, setCookie, deleteCookie } from '../util/cookies.ts';
+
+// Cookie keys for persisting UI state across page reloads.
+const COOKIE_SELECTED = 'sm_selected_object';
+const COOKIE_RENDER_MODE = 'sm_render_mode';
 
 export class DashboardUI {
   private container: HTMLElement;
@@ -6,6 +11,14 @@ export class DashboardUI {
 
   // Selected state
   private selectedEntity: GalaxyEntity | null = null;
+
+  // Render-mode tier buttons (Generic / Gray / Color / Texture)
+  private renderButtons: Array<{ id: string; mode: RenderMode }> = [
+    { id: 'render-btn-generic', mode: 'GENERIC' },
+    { id: 'render-btn-gray', mode: 'GRAY' },
+    { id: 'render-btn-color', mode: 'COLOR' },
+    { id: 'render-btn-texture', mode: 'TEXTURE' },
+  ];
 
   // DOM Elements cache
   private elLeftList!: HTMLElement;
@@ -21,6 +34,7 @@ export class DashboardUI {
 
   public setRenderer(renderer: GalaxyRenderer) {
     this.renderer = renderer;
+    this.restoreRenderMode();
   }
 
   private renderLayout() {
@@ -130,19 +144,48 @@ export class DashboardUI {
     });
 
     // Render-mode tier buttons (Generic / Gray / Color / Texture)
-    const renderButtons: Array<{ id: string; mode: 'GENERIC' | 'GRAY' | 'COLOR' | 'TEXTURE' }> = [
-      { id: 'render-btn-generic', mode: 'GENERIC' },
-      { id: 'render-btn-gray', mode: 'GRAY' },
-      { id: 'render-btn-color', mode: 'COLOR' },
-      { id: 'render-btn-texture', mode: 'TEXTURE' },
-    ];
-    for (const { id, mode } of renderButtons) {
-      const btn = document.getElementById(id)!;
-      btn.addEventListener('click', () => {
-        this.renderer.setRenderMode(mode);
-        renderButtons.forEach(rb => document.getElementById(rb.id)!.classList.remove('active'));
-        btn.classList.add('active');
+    for (const { id, mode } of this.renderButtons) {
+      document.getElementById(id)!.addEventListener('click', () => {
+        this.applyRenderMode(mode);
       });
+    }
+  }
+
+  // Switch render tier, sync button highlight, and remember the choice in a cookie.
+  private applyRenderMode(mode: RenderMode, persist = true) {
+    this.renderer.setRenderMode(mode);
+    this.renderButtons.forEach(rb => {
+      document.getElementById(rb.id)!.classList.toggle('active', rb.mode === mode);
+    });
+    if (persist) setCookie(COOKIE_RENDER_MODE, mode);
+  }
+
+  // Re-apply the last render/texture tier saved in the cookie, if any.
+  private restoreRenderMode() {
+    const saved = getCookie(COOKIE_RENDER_MODE) as RenderMode | null;
+    if (saved && this.renderButtons.some(rb => rb.mode === saved)) {
+      this.applyRenderMode(saved, false);
+    }
+  }
+
+  // Re-select the object stored in the cookie, once galaxy data has loaded.
+  public restoreSelection() {
+    const raw = getCookie(COOKIE_SELECTED);
+    if (!raw) return;
+    try {
+      const sel = JSON.parse(raw);
+      if (sel.kind === 'player' && typeof sel.name === 'string') {
+        if (this.renderer.getPlayers().some(p => p.name === sel.name)) {
+          this.renderer.selectPlayer(sel.name);
+        }
+      } else if (sel.kind === 'entity' && typeof sel.id === 'number') {
+        if (this.renderer.getEntities().some(e => e.id === sel.id)) {
+          this.renderer.selectEntity(sel.id);
+        }
+      }
+    } catch {
+      // Malformed cookie — drop it so we don't keep retrying a bad value.
+      deleteCookie(COOKIE_SELECTED);
     }
   }
 
@@ -286,6 +329,18 @@ export class DashboardUI {
 
   public showEntityInfo(entity: GalaxyEntity | null) {
     this.selectedEntity = entity;
+
+    // Persist the current selection so it can be restored on the next page load.
+    // Player markers arrive as a pseudo-entity with id -999 (keyed by name).
+    if (entity) {
+      const sel = entity.id === -999
+        ? { kind: 'player', name: entity.name }
+        : { kind: 'entity', id: entity.id };
+      setCookie(COOKIE_SELECTED, JSON.stringify(sel));
+    } else {
+      deleteCookie(COOKIE_SELECTED);
+    }
+
     const placeholder = document.getElementById('stats-placeholder')!;
     const content = document.getElementById('stats-content')!;
 
