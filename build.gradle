@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+group = 'com.starmade.map'
+version = '1.0.1'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // StarMade dependencies. Assume they are placed in 'libs/' folder.
+    // If not present, we will decompile/stub them for compilation, or compileOnly.
+    compileOnly files('libs/StarMade.jar')
+
+    // Embedded Web Server and WebSockets
+    implementation 'io.undertow:undertow-core:2.2.24.Final'
+    
+    // JSON processing
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+
+    // Testing
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.9.3'
+    testImplementation files('libs/StarMade.jar')
+    testImplementation files('libs/hsqldb.jar')
+    testImplementation files('libs/fastutil-6.5.0.jar')
+    testImplementation files('libs/vecmath.jar')
+    testImplementation 'com.googlecode.javaewah:JavaEWAH:1.1.12'
+    testImplementation 'org.mockito:mockito-core:5.3.1'
+}
+
+test {
+    useJUnitPlatform()
+    jvmArgs '-noverify'
+}
+
+jar {
+    exclude 'org/schema/**'
+    exclude 'api/**'
+    exclude 'javax/vecmath/**'
+    exclude 'com/bulletphysics/**'
+}
+
+shadowJar {
+    archiveClassifier.set('')
+    // Relocate Undertow/Jackson to prevent dependency conflicts with StarMade or other mods
+    relocate 'io.undertow', 'com.starmade.map.shadow.io.undertow'
+    relocate 'com.fasterxml.jackson', 'com.starmade.map.shadow.com.fasterxml.jackson'
+    
+    exclude 'org/schema/**'
+    exclude 'api/**'
+    exclude 'javax/vecmath/**'
+    exclude 'com/bulletphysics/**'
+}

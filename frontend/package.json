@@ -1,0 +1,19 @@
+{
+  "name": "starmade-map-frontend",
+  "private": true,
+  "version": "1.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.158.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.158.2",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.0"
+  }
+}
