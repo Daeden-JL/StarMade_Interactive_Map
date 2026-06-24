@@ -1,10 +1,11 @@
 plugins {
     id 'java'
     id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'maven-publish'
 }
 
 group = 'com.starmade.map'
-version = '1.0.1'
+version = '1.0.2'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
@@ -53,9 +54,32 @@ shadowJar {
     // Relocate Undertow/Jackson to prevent dependency conflicts with StarMade or other mods
     relocate 'io.undertow', 'com.starmade.map.shadow.io.undertow'
     relocate 'com.fasterxml.jackson', 'com.starmade.map.shadow.com.fasterxml.jackson'
-    
+
     exclude 'org/schema/**'
     exclude 'api/**'
     exclude 'javax/vecmath/**'
     exclude 'com/bulletphysics/**'
+}
+
+// Publish the shaded JAR to GitHub Packages (Maven registry).
+//   Credentials come from gradle properties (gpr.user / gpr.token) or, in CI,
+//   the GITHUB_ACTOR / GITHUB_TOKEN environment variables. The token needs the
+//   write:packages scope. Publish with:  gradle publish
+publishing {
+    publications {
+        shadow(MavenPublication) { publication ->
+            project.shadow.component(publication)
+            artifactId = 'starmade-interactive-map'
+        }
+    }
+    repositories {
+        maven {
+            name = 'GitHubPackages'
+            url = uri('https://maven.pkg.github.com/Daeden-JL/StarMade_Interactive_Map')
+            credentials {
+                username = project.findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
+                password = project.findProperty('gpr.token') ?: System.getenv('GITHUB_TOKEN')
+            }
+        }
+    }
 }

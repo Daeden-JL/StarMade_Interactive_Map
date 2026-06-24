@@ -17,6 +17,9 @@ client — think BlueMap, but for StarMade's galaxy.
 - **Search & inspect** systems, stations, ships, and players from the sidebar, with faction colors/names.
 - **Persistent UI state** — the last selected object and the last render/texture tier are stored in
   cookies and restored on reload.
+- **Startup update check** — on enable, the plugin checks GitHub Releases (authoritative) and
+  StarMadeDock for a newer version and logs the result. Non-blocking and best-effort; failures are
+  ignored (StarMadeDock is behind Cloudflare and may be unreachable from a server).
 
 ## Architecture
 
@@ -76,6 +79,25 @@ make clean            # remove build outputs + generated web assets
 
 The output is a single shaded JAR (`build/libs/`) with Undertow and Jackson relocated under
 `com.starmade.map.shadow.*` to avoid clashing with StarMade or other mods.
+
+## Releasing & publishing
+
+Tagged builds are published two ways:
+
+- **GitHub Releases** — the downloadable JAR is attached to each release under
+  [Releases](https://github.com/Daeden-JL/StarMade_Interactive_Map/releases). Because the build
+  requires the proprietary `libs/StarMade.jar` (not distributable), releases are built locally and
+  uploaded rather than built in CI.
+- **GitHub Packages** — the shaded JAR is published to the GitHub Packages Maven registry as
+  `com.starmade.map:starmade-interactive-map`:
+
+  ```bash
+  gradle publish \
+    -Pgpr.user=<github-username> \
+    -Pgpr.token=<token-with-write:packages>
+  ```
+
+  Credentials may also come from the `GITHUB_ACTOR` / `GITHUB_TOKEN` environment variables.
 
 ## Installing on a server
 

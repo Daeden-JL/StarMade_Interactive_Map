@@ -3,6 +3,9 @@ package com.starmade.map;
 import api.mod.StarMod;
 import com.starmade.map.server.MapWebServer;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.*;
 import java.util.Properties;
 
@@ -29,6 +32,27 @@ public class StarMadeMapPlugin extends StarMod {
         webServer = new MapWebServer(port);
         webServer.start();
         logInfo("Map web server listening on port: " + port);
+
+        // Best-effort, non-blocking check for a newer release on GitHub / StarMadeDock.
+        String version = readModVersion();
+        logInfo("Checking for updates (installed version " + version + ")...");
+        new UpdateChecker(version, this::logInfo, this::logWarning).checkAsync();
+    }
+
+    /**
+     * Read this mod's own version from the bundled mod.json so the update check has a single
+     * source of truth. Falls back to "0.0.0" if the manifest can't be read.
+     */
+    private String readModVersion() {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream("mod.json")) {
+            if (is != null) {
+                JsonNode node = new ObjectMapper().readTree(is);
+                return node.path("version").asText("0.0.0");
+            }
+        } catch (Exception e) {
+            logWarning("Could not read mod.json version, defaulting to 0.0.0: " + e.getMessage());
+        }
+        return "0.0.0";
     }
 
     @Override
