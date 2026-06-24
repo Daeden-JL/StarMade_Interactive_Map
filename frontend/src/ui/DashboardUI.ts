@@ -1,9 +1,11 @@
 import { GalaxyEntity, GalaxyRenderer, RenderMode } from '../renderer/GalaxyRenderer.ts';
+import { CameraMode } from '../camera/CameraController.ts';
 import { getCookie, setCookie, deleteCookie } from '../util/cookies.ts';
 
 // Cookie keys for persisting UI state across page reloads.
 const COOKIE_SELECTED = 'sm_selected_object';
 const COOKIE_RENDER_MODE = 'sm_render_mode';
+const COOKIE_CAMERA_MODE = 'sm_camera_mode';
 
 export class DashboardUI {
   private container: HTMLElement;
@@ -12,12 +14,22 @@ export class DashboardUI {
   // Selected state
   private selectedEntity: GalaxyEntity | null = null;
 
+  // Whether the first-person pointer lock is currently engaged
+  private pointerLocked = false;
+
   // Render-mode tier buttons (Generic / Gray / Color / Texture)
   private renderButtons: Array<{ id: string; mode: RenderMode }> = [
     { id: 'render-btn-generic', mode: 'GENERIC' },
     { id: 'render-btn-gray', mode: 'GRAY' },
     { id: 'render-btn-color', mode: 'COLOR' },
     { id: 'render-btn-texture', mode: 'TEXTURE' },
+  ];
+
+  // Camera mode buttons (Fly / Orbit / First-Person)
+  private cameraButtons: Array<{ id: string; mode: CameraMode }> = [
+    { id: 'cam-btn-fly', mode: 'FLY' },
+    { id: 'cam-btn-orbit', mode: 'ORBIT' },
+    { id: 'cam-btn-fpv', mode: 'FPV' },
   ];
 
   // DOM Elements cache
@@ -34,7 +46,9 @@ export class DashboardUI {
 
   public setRenderer(renderer: GalaxyRenderer) {
     this.renderer = renderer;
+    this.renderer.setPointerLockCallback((locked) => this.onPointerLockChange(locked));
     this.restoreRenderMode();
+    this.restoreCameraMode();
   }
 
   private renderLayout() {
@@ -90,6 +104,10 @@ export class DashboardUI {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
             Fly Mode
           </button>
+          <button id="cam-btn-fpv" class="btn-hud" title="First-person free flight (BlueMap style) — click the view to look around">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            First-Person
+          </button>
           <button id="cam-btn-orbit" class="btn-hud">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"></circle><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line></svg>
             Orbit Focus
@@ -111,6 +129,11 @@ export class DashboardUI {
 
       <!-- Tooltip -->
       <div id="hud-tooltip" class="hud-panel" style="display: none; position: absolute; pointer-events: none; z-index: 100; padding: 10px 15px; font-size: 11px; min-width: 180px;"></div>
+
+      <!-- First-person mode hint (shown when FPV is active but the pointer isn't captured yet) -->
+      <div id="fpv-hint" class="hud-panel" style="display: none; position: absolute; left: 50%; top: 60px; transform: translateX(-50%); pointer-events: none; z-index: 100; padding: 8px 16px; font-family: var(--font-hud); font-size: 11px; letter-spacing: 0.5px; color: var(--color-primary);">
+        Click the view to fly &nbsp;·&nbsp; <strong>WASD</strong> move &nbsp;·&nbsp; <strong>E/Q</strong> up/down &nbsp;·&nbsp; <strong>Esc</strong> to release
+      </div>
     `;
 
     // Cache elements
@@ -125,23 +148,12 @@ export class DashboardUI {
       this.populateEntitiesList();
     });
 
-    // Camera Mode toggle buttons
-    const btnFly = document.getElementById('cam-btn-fly')!;
-    const btnOrbit = document.getElementById('cam-btn-orbit')!;
-
-    btnFly.addEventListener('click', () => {
-      this.renderer.setCameraMode('FLY');
-      btnFly.classList.add('active');
-      btnOrbit.classList.remove('active');
-      document.getElementById('speed-indicator')!.style.display = 'flex';
-    });
-
-    btnOrbit.addEventListener('click', () => {
-      this.renderer.setCameraMode('ORBIT');
-      btnOrbit.classList.add('active');
-      btnFly.classList.remove('active');
-      document.getElementById('speed-indicator')!.style.display = 'none';
-    });
+    // Camera Mode toggle buttons (Fly / Orbit / First-Person)
+    for (const { id, mode } of this.cameraButtons) {
+      document.getElementById(id)!.addEventListener('click', () => {
+        this.applyCameraMode(mode);
+      });
+    }
 
     // Render-mode tier buttons (Generic / Gray / Color / Texture)
     for (const { id, mode } of this.renderButtons) {
@@ -149,6 +161,44 @@ export class DashboardUI {
         this.applyRenderMode(mode);
       });
     }
+  }
+
+  // Switch camera mode, sync the HUD, and remember the choice in a cookie.
+  private applyCameraMode(mode: CameraMode, persist = true) {
+    this.renderer.setCameraMode(mode);
+    this.syncCameraModeUI(mode);
+    if (persist) setCookie(COOKIE_CAMERA_MODE, mode);
+  }
+
+  // Reflect the active camera mode in the HUD (button highlight, speed readout, FPV hint).
+  private syncCameraModeUI(mode: CameraMode) {
+    this.cameraButtons.forEach(b => {
+      document.getElementById(b.id)!.classList.toggle('active', b.mode === mode);
+    });
+    // Orbit has no free-flight speed; Fly and FPV both do.
+    document.getElementById('speed-indicator')!.style.display = mode === 'ORBIT' ? 'none' : 'flex';
+    this.updateFpvHint(mode);
+  }
+
+  // Re-apply the last camera mode saved in the cookie. Orbit is contextual to a selected
+  // object, so we only restore the free-flight preferences (Fly / First-Person).
+  private restoreCameraMode() {
+    const saved = getCookie(COOKIE_CAMERA_MODE) as CameraMode | null;
+    if (saved === 'FLY' || saved === 'FPV') {
+      this.applyCameraMode(saved, false);
+    }
+  }
+
+  // Pointer-lock state changed (engaged by clicking the view, released with Esc).
+  private onPointerLockChange(locked: boolean) {
+    this.pointerLocked = locked;
+    this.updateFpvHint(this.renderer.getCameraMode());
+  }
+
+  // The hint is only useful in FPV while the pointer isn't captured yet.
+  private updateFpvHint(mode: CameraMode) {
+    const hint = document.getElementById('fpv-hint');
+    if (hint) hint.style.display = mode === 'FPV' && !this.pointerLocked ? 'block' : 'none';
   }
 
   // Switch render tier, sync button highlight, and remember the choice in a cookie.
@@ -507,20 +557,9 @@ export class DashboardUI {
     }
   }
 
-  public updateCameraModeButtons(mode: 'FLY' | 'ORBIT') {
-    const btnFly = document.getElementById('cam-btn-fly');
-    const btnOrbit = document.getElementById('cam-btn-orbit');
-    const speedInd = document.getElementById('speed-indicator');
-    if (btnFly && btnOrbit && speedInd) {
-      if (mode === 'FLY') {
-        btnFly.classList.add('active');
-        btnOrbit.classList.remove('active');
-        speedInd.style.display = 'flex';
-      } else {
-        btnOrbit.classList.add('active');
-        btnFly.classList.remove('active');
-        speedInd.style.display = 'none';
-      }
-    }
+  // Reflect a camera-mode change that originated outside the HUD (e.g. selecting an object
+  // switches to Orbit). Does not persist — only explicit button clicks update the cookie.
+  public updateCameraModeButtons(mode: CameraMode) {
+    this.syncCameraModeUI(mode);
   }
 }

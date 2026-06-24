@@ -10,7 +10,8 @@ client — think BlueMap, but for StarMade's galaxy.
 
 ## Features
 
-- **3D galaxy & sector view** — fly or orbit cameras (toggle with the on‑screen controls / spacebar).
+- **3D galaxy & sector view** — fly, orbit, or BlueMap-style **first-person free flight** cameras
+  (click the view to capture the mouse; WASD to move, E/Q for up/down, Esc to release).
 - **Real‑time tracking** — online players and dynamic ships update live over a WebSocket.
 - **Voxel ship/station rendering** with selectable detail tiers: **Generic → Gray → Color → Texture**
   (real StarMade block geometry, per‑block colors, and block textures).
@@ -27,7 +28,10 @@ Planned features:
 
 - **Fix partial and transparent blocks** — correct rendering of non-full blocks (wedges, corners,
   etc.) and proper transparency for glass and similar materials.
-- **BlueMap-style first-person fly view** — a free-fly first-person camera mode like BlueMap's.
+
+Recently shipped:
+
+- ~~BlueMap-style first-person fly view~~ — done (see Features).
 
 ## Architecture
 

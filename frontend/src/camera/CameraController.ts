@@ -1,6 +1,6 @@
 import { PerspectiveCamera, Vector3, MathUtils } from 'three';
 
-export type CameraMode = 'FLY' | 'ORBIT';
+export type CameraMode = 'FLY' | 'ORBIT' | 'FPV';
 
 export class CameraController {
   private camera: PerspectiveCamera;
@@ -39,6 +39,11 @@ export class CameraController {
   // Reference object to follow
   private followTarget: { getPosition: () => Vector3 } | null = null;
 
+  // First-person (FPV) mode state: pointer is locked and mouse movement drives the look
+  private pointerLocked = false;
+  private lookSensitivity = 0.002;
+  private onPointerLockChange: ((locked: boolean) => void) | null = null;
+
   constructor(camera: PerspectiveCamera, domElement: HTMLElement) {
     this.camera = camera;
     this.domElement = domElement;
@@ -51,6 +56,10 @@ export class CameraController {
   }
 
   public setMode(mode: CameraMode) {
+    // Release the mouse when leaving first-person mode.
+    if (mode !== 'FPV' && this.pointerLocked) {
+      document.exitPointerLock();
+    }
     this.mode = mode;
     if (mode === 'ORBIT') {
       // Transition settings
@@ -71,8 +80,7 @@ export class CameraController {
       this.theta = Math.atan2(offset.x, offset.z);
       this.phi = Math.acos(MathUtils.clamp(offset.y / this.orbitRadius, -0.99, 0.99));
     } else {
-      // Transitioning to Fly Mode
-      // Retain orientation angles
+      // Transitioning to a free-look mode (FLY or FPV): retain current orientation angles.
       const dir = new Vector3();
       this.camera.getWorldDirection(dir);
       this.yaw = Math.atan2(dir.x, dir.z);
@@ -94,17 +102,20 @@ export class CameraController {
 
   public update(deltaTime: number) {
     if (this.mode === 'FLY') {
-      this.updateFlyMode(deltaTime);
+      this.updateFlyMode(deltaTime, false);
+    } else if (this.mode === 'FPV') {
+      this.updateFlyMode(deltaTime, true);
     } else if (this.mode === 'ORBIT') {
       this.updateOrbitMode(deltaTime);
     }
   }
 
-  private updateFlyMode(deltaTime: number) {
+  // fullDirection: FPV flies along the full look vector; FLY keeps W/S level with the horizon.
+  private updateFlyMode(deltaTime: number, fullDirection: boolean = false) {
     const moveDir = new Vector3();
     const forwardDir = new Vector3();
     this.camera.getWorldDirection(forwardDir);
-    forwardDir.y = 0; // lock to horizontal plane for navigation
+    if (!fullDirection) forwardDir.y = 0; // lock to horizontal plane for navigation
     forwardDir.normalize();
 
     const rightDir = new Vector3().crossVectors(forwardDir, new Vector3(0, 1, 0)).normalize();
@@ -212,6 +223,15 @@ export class CameraController {
     });
 
     window.addEventListener('mousemove', (e) => {
+      // First-person look: while the pointer is locked, mouse movement drives yaw/pitch directly.
+      if (this.mode === 'FPV' && this.pointerLocked) {
+        this.yaw -= e.movementX * this.lookSensitivity;
+        this.pitch -= e.movementY * this.lookSensitivity;
+        const maxPitch = Math.PI / 2.0 - 0.02;
+        this.pitch = MathUtils.clamp(this.pitch, -maxPitch, maxPitch);
+        return;
+      }
+
       if (this.dragButton === null) return;
 
       const deltaX = e.clientX - this.previousMousePosition.x;
@@ -234,7 +254,7 @@ export class CameraController {
     // Mouse wheel zoom
     this.domElement.addEventListener('wheel', (e) => {
       e.preventDefault(); // Prevent standard page scroll
-      if (this.mode === 'FLY') {
+      if (this.mode === 'FLY' || this.mode === 'FPV') {
         // Zoom in/out of the map by moving camera forward/backward along the look direction
         const dir = new Vector3();
         this.camera.getWorldDirection(dir);
@@ -254,6 +274,18 @@ export class CameraController {
 
     // Prevent context menu
     this.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // First-person mode: click the canvas to capture the mouse; Esc (browser default) releases it.
+    this.domElement.addEventListener('click', () => {
+      if (this.mode === 'FPV' && !this.pointerLocked) {
+        this.domElement.requestPointerLock();
+      }
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+      this.pointerLocked = document.pointerLockElement === this.domElement;
+      if (this.onPointerLockChange) this.onPointerLockChange(this.pointerLocked);
+    });
   }
 
   private adjustSpeed(delta: number) {
@@ -314,5 +346,13 @@ export class CameraController {
 
   public getFlySpeed(): number {
     return this.flySpeed;
+  }
+
+  public setPointerLockCallback(cb: (locked: boolean) => void) {
+    this.onPointerLockChange = cb;
+  }
+
+  public isPointerLocked(): boolean {
+    return this.pointerLocked;
   }
 }

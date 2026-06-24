@@ -696,6 +696,10 @@ export class GalaxyRenderer {
     this.cameraController.setMode(mode);
   }
 
+  public setPointerLockCallback(cb: (locked: boolean) => void) {
+    this.cameraController.setPointerLockCallback(cb);
+  }
+
   public getCameraMode(): CameraMode {
     return this.cameraController.mode;
   }
@@ -709,6 +713,10 @@ export class GalaxyRenderer {
   }
 
   private handleCanvasClick(e: MouseEvent) {
+    // In first-person mode a click captures the mouse (handled by CameraController), so don't
+    // also treat it as an object-selection raycast.
+    if (document.pointerLockElement === this.renderer.domElement) return;
+
     // Normalize coordinates to -1 to +1 space
     const rect = this.renderer.domElement.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
