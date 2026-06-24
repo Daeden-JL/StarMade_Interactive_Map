@@ -36,7 +36,16 @@ public class StarMadeMapPlugin extends StarMod {
         // Best-effort, non-blocking check for a newer release on GitHub / StarMadeDock.
         String version = readModVersion();
         logInfo("Checking for updates (installed version " + version + ")...");
-        new UpdateChecker(version, this::logInfo, this::logWarning).checkAsync();
+        new UpdateChecker(version, this::logInfo, this::logPluginWarning).checkAsync();
+    }
+
+    /**
+     * Warn-level log via stderr, matching the rest of the plugin. StarMod's warn method name
+     * differs between the bundled API stub and the live StarMade jar, so we avoid it and use
+     * stderr directly (same convention as onDisable()).
+     */
+    private void logPluginWarning(String message) {
+        System.err.println("[StarMade Map Plugin] [WARNING] " + message);
     }
 
     /**
@@ -50,7 +59,7 @@ public class StarMadeMapPlugin extends StarMod {
                 return node.path("version").asText("0.0.0");
             }
         } catch (Exception e) {
-            logWarning("Could not read mod.json version, defaulting to 0.0.0: " + e.getMessage());
+            logPluginWarning("Could not read mod.json version, defaulting to 0.0.0: " + e.getMessage());
         }
         return "0.0.0";
     }
