@@ -68,26 +68,41 @@ const _tmpQ = new Quaternion();
 const WEDGE_FLOOR_Y_ANGLE = [Math.PI, -Math.PI / 2, 0, Math.PI / 2];
 
 /**
+ * Floor tetras (corner pieces sitting on a deck) — orientation bytes 0-3. Confirmed against
+ * the HGN-Destroyer bump corners, where each tetra fills the outer corner and slopes up toward
+ * the centre. buildTetra()'s canonical solid corner is at (-X,-Y,-Z), matching byte 3 (NW);
+ * the rest are rotations about Y: 0 = NE (-90°), 1 = SE (180°), 2 = SW (+90°), 3 = NW (0°).
+ */
+const TETRA_FLOOR_Y_ANGLE = [-Math.PI / 2, Math.PI, Math.PI / 2, 0];
+
+/**
  * Map a block's orientation byte to a rotation for its shape.
  *
- * Wedges 0-3 (floor ramps) are confirmed against a real ship. Wedges 4-11 (ceiling and
- * vertical-wall families) are a HYPOTHESIS pending verification, and corner/tetra/hepta
- * orientation isn't handled yet (returns identity) — both are next in the verify loop.
+ * Confirmed against a real ship: wedges 0-3 (floor ramps) and tetras 0-3 (floor corners).
+ * Wedges 4-11 are a HYPOTHESIS; tetras 4-23, corner (style 2) and hepta orientation aren't
+ * handled yet (identity) — next in the verify loop.
  */
 export function orientationQuaternion(style: number, orientation: number, out: Quaternion): Quaternion {
-  if (style !== BlockStyle.WEDGE) return out.identity();
   const o = orientation & 0xff;
-  if (o <= 3) {
-    return out.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[o]);
+
+  if (style === BlockStyle.WEDGE) {
+    if (o <= 3) return out.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[o]);
+    if (o <= 7) {
+      // HYPOTHESIS: ceiling wedges = floor pattern flipped 180° about X.
+      _tmpQ.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[o - 4]);
+      return out.setFromAxisAngle(_axisX, Math.PI).multiply(_tmpQ);
+    }
+    // HYPOTHESIS: side/vertical wedges = floor pattern tipped 90° about Z.
+    _tmpQ.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[(o - 8) & 3]);
+    return out.setFromAxisAngle(_axisZ, Math.PI / 2).multiply(_tmpQ);
   }
-  if (o <= 7) {
-    // HYPOTHESIS: ceiling wedges = floor pattern flipped 180° about X.
-    _tmpQ.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[o - 4]);
-    return out.setFromAxisAngle(_axisX, Math.PI).multiply(_tmpQ);
+
+  if (style === BlockStyle.TETRA) {
+    if (o <= 3) return out.setFromAxisAngle(_axisY, TETRA_FLOOR_Y_ANGLE[o]);
+    return out.identity(); // tetras 4-23 (other corners) pending
   }
-  // HYPOTHESIS: side/vertical wedges = floor pattern tipped 90° about Z.
-  _tmpQ.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[(o - 8) & 3]);
-  return out.setFromAxisAngle(_axisZ, Math.PI / 2).multiply(_tmpQ);
+
+  return out.identity();
 }
 
 type V3 = [number, number, number];
