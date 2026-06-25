@@ -1,4 +1,4 @@
-import { BoxGeometry, BufferGeometry, Float32BufferAttribute, Quaternion } from 'three';
+import { BoxGeometry, BufferGeometry, Float32BufferAttribute, Quaternion, Vector3 } from 'three';
 
 /**
  * StarMade block shapes and the geometry/orientation handling for the non-cube ones
@@ -52,16 +52,42 @@ export function buildBlockGeometry(key: string, scale: number): BufferGeometry {
   }
 }
 
+// Reusable temporaries (this runs per-voxel, so avoid per-call allocations).
+const _axisX = new Vector3(1, 0, 0);
+const _axisY = new Vector3(0, 1, 0);
+const _axisZ = new Vector3(0, 0, 1);
+const _tmpQ = new Quaternion();
+
 /**
- * First-attempt orientation -> rotation. Currently identity for every block (scaffold):
- * shapes render in their canonical orientation so we can confirm geometry/detection first.
- *
- * TODO(verify-loop): map StarMade's per-style orientation byte (SegmentPiece.getOrientation())
- * to the correct rotation here. The encoding differs per BlockStyle; fill in once we compare
- * against a real ship.
+ * Wedge orientation bytes 0-3 are the "floor" wedges (full floor + one vertical wall, a ramp
+ * rising horizontally). Derived geometrically from the HGN-Destroyer top bump, where the ring
+ * of wedges slopes up toward the centre:
+ *   2 = canonical (high side -Z), 0 = +180°, 1 = -90°, 3 = +90°, all about Y.
+ * The canonical geometry in buildWedge() has its tall wall at -Z, so value 2 is identity.
  */
-export function orientationQuaternion(_style: number, _orientation: number, out: Quaternion): Quaternion {
-  return out.identity();
+const WEDGE_FLOOR_Y_ANGLE = [Math.PI, -Math.PI / 2, 0, Math.PI / 2];
+
+/**
+ * Map a block's orientation byte to a rotation for its shape.
+ *
+ * Wedges 0-3 (floor ramps) are confirmed against a real ship. Wedges 4-11 (ceiling and
+ * vertical-wall families) are a HYPOTHESIS pending verification, and corner/tetra/hepta
+ * orientation isn't handled yet (returns identity) — both are next in the verify loop.
+ */
+export function orientationQuaternion(style: number, orientation: number, out: Quaternion): Quaternion {
+  if (style !== BlockStyle.WEDGE) return out.identity();
+  const o = orientation & 0xff;
+  if (o <= 3) {
+    return out.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[o]);
+  }
+  if (o <= 7) {
+    // HYPOTHESIS: ceiling wedges = floor pattern flipped 180° about X.
+    _tmpQ.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[o - 4]);
+    return out.setFromAxisAngle(_axisX, Math.PI).multiply(_tmpQ);
+  }
+  // HYPOTHESIS: side/vertical wedges = floor pattern tipped 90° about Z.
+  _tmpQ.setFromAxisAngle(_axisY, WEDGE_FLOOR_Y_ANGLE[(o - 8) & 3]);
+  return out.setFromAxisAngle(_axisZ, Math.PI / 2).multiply(_tmpQ);
 }
 
 type V3 = [number, number, number];
