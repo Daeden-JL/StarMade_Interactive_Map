@@ -14,7 +14,8 @@ client — think BlueMap, but for StarMade's galaxy.
   (click the view to capture the mouse; WASD to move, E/Q for up/down, Esc to release).
 - **Real‑time tracking** — online players and dynamic ships update live over a WebSocket.
 - **Voxel ship/station rendering** with selectable detail tiers: **Generic → Gray → Color → Texture**
-  (real StarMade block geometry, per‑block colors, and block textures).
+  (real StarMade block geometry, per‑block colors, and block textures). Transparent blocks (glass,
+  crystal) render with alpha.
 - **Search & inspect** systems, stations, ships, and players from the sidebar, with faction colors/names.
 - **Persistent UI state** — the last selected object and the last render/texture tier are stored in
   cookies and restored on reload.
@@ -26,12 +27,14 @@ client — think BlueMap, but for StarMade's galaxy.
 
 Planned features:
 
-- **Fix partial and transparent blocks** — correct rendering of non-full blocks (wedges, corners,
-  etc.) and proper transparency for glass and similar materials.
+- **Fix partial blocks** — correct rendering of non-full blocks (wedges, corners, tetras, heptas),
+  which currently render as full cubes. Needs per-instance orientation in the voxel stream plus
+  per-shape geometry on the client.
 
 Recently shipped:
 
 - ~~BlueMap-style first-person fly view~~ — done (see Features).
+- ~~Transparent blocks~~ — glass/crystal (alpha-blended) blocks now render with transparency.
 
 ## Architecture
 

@@ -866,6 +866,9 @@ public class MapWebServer {
             resp.put("tilesPerPage", 256);
 
             Map<String, short[]> blocks = new HashMap<>();
+            // Block type ids that render with alpha blending (glass, crystal, etc.) so the
+            // client can draw them transparently.
+            java.util.List<Short> transparentTypes = new java.util.ArrayList<>();
             try {
                 org.schema.game.common.data.element.ElementInformation[] arr =
                     org.schema.game.common.data.element.ElementKeyMap.getInfoArray();
@@ -879,12 +882,14 @@ public class MapWebServer {
                             try { sides[s] = info.getTextureId(s); } catch (Throwable t) { sides[s] = 0; }
                         }
                         blocks.put(String.valueOf(id), sides);
+                        try { if (info.isBlended()) transparentTypes.add(id); } catch (Throwable t) { /* ignore */ }
                     }
                 }
             } catch (Throwable t) {
                 System.err.println("[StarMade Map Web Server] Error building block meta: " + t);
             }
             resp.put("blocks", blocks);
+            resp.put("transparentTypes", transparentTypes);
             cached = mapper.writeValueAsString(resp);
             blockMetaCache = cached;
         }

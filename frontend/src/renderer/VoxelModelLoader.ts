@@ -39,6 +39,22 @@ interface TextureAtlas {
   typeTiles: Map<number, number[]>;     // block type id -> 6 side atlas tile indices
 }
 
+// Per-type block metadata from /api/blockmeta, fetched once and shared.
+interface BlockInfo {
+  tileSize: number;
+  tilesPerRow: number;
+  tilesPerPage: number;
+  typeTiles: Map<number, number[]>;     // block type id -> 6 side atlas tile indices
+  transparent: Set<number>;             // block type ids that render with alpha blending
+}
+
+// One decoded voxel record.
+interface Voxel {
+  rx: number; ry: number; rz: number;
+  r: number; g: number; b: number;
+  blockType: number;
+}
+
 export class VoxelModelLoader {
   // Reusable material
   private static material = new MeshStandardMaterial({
@@ -56,27 +72,56 @@ export class VoxelModelLoader {
   // Lazily-built block texture atlas (shared across all textured meshes).
   private static textureAtlasPromise: Promise<TextureAtlas> | null = null;
 
+  // Lazily-fetched per-type block metadata (shared across all meshes and the atlas).
+  private static blockInfoPromise: Promise<BlockInfo> | null = null;
+
   /**
-   * Loads the block texture atlas once: fetches /api/blockmeta, composites the
-   * needed atlas pages into one vertically-stacked super-atlas, and builds a
-   * MeshStandardMaterial whose vertex shader maps each instance's `aTile` index
-   * to the right tile UVs.
+   * Fetches /api/blockmeta once and parses it into per-type metadata: the 6 side
+   * atlas tile indices per block type and the set of transparent (alpha-blended)
+   * block types. Shared by both the texture atlas and the per-voxel mesh builder.
    */
-  private static ensureTextureAtlas(): Promise<TextureAtlas> {
-    if (!this.textureAtlasPromise) {
-      this.textureAtlasPromise = (async () => {
+  private static ensureBlockInfo(): Promise<BlockInfo> {
+    if (!this.blockInfoPromise) {
+      this.blockInfoPromise = (async () => {
         const meta = await fetch('/api/blockmeta').then(r => r.json());
         const tilesPerPage: number = meta.tilesPerPage ?? 256;
         const tilesPerRow: number = meta.tilesPerRow ?? 16;
         const tileSize: number = meta.tileSize ?? 64;
-        const pageSize = tileSize * tilesPerRow; // px per atlas page (e.g. 1024)
 
         const typeTiles = new Map<number, number[]>();
-        let maxTile = 0;
         for (const k in meta.blocks) {
           const sides: number[] = meta.blocks[k];
           const six = [0, 1, 2, 3, 4, 5].map(s => (sides && sides.length > s ? sides[s] : 0));
           typeTiles.set(parseInt(k, 10), six);
+        }
+
+        const transparent = new Set<number>();
+        if (Array.isArray(meta.transparentTypes)) {
+          for (const t of meta.transparentTypes) transparent.add(t);
+        }
+
+        return { tileSize, tilesPerRow, tilesPerPage, typeTiles, transparent };
+      })();
+    }
+    return this.blockInfoPromise;
+  }
+
+  /**
+   * Loads the block texture atlas once: composites the needed atlas pages into one
+   * vertically-stacked super-atlas, and builds a MeshStandardMaterial whose vertex
+   * shader maps each instance's tile index to the right tile UVs.
+   */
+  private static ensureTextureAtlas(): Promise<TextureAtlas> {
+    if (!this.textureAtlasPromise) {
+      this.textureAtlasPromise = (async () => {
+        const info = await this.ensureBlockInfo();
+        const tilesPerPage = info.tilesPerPage;
+        const tilesPerRow = info.tilesPerRow;
+        const pageSize = info.tileSize * tilesPerRow; // px per atlas page (e.g. 1024)
+
+        const typeTiles = info.typeTiles;
+        let maxTile = 0;
+        for (const six of typeTiles.values()) {
           for (const t of six) if (t > maxTile) maxTile = t;
         }
         const pages = Math.floor(maxTile / tilesPerPage) + 1;
@@ -271,7 +316,16 @@ export class VoxelModelLoader {
 
     // GENERIC tier: skip the network entirely and render the procedural placeholder.
     if (mode === 'GENERIC') {
-      return this.parseBinaryVoxelShell(this.getProceduralVoxelBuffer(type), scale, 'COLOR', null);
+      return this.parseBinaryVoxelShell(this.getProceduralVoxelBuffer(type), scale, 'COLOR', null, new Set());
+    }
+
+    // Per-type metadata (which block types are transparent). Best-effort: if it fails
+    // (e.g. an older server), treat everything as opaque so rendering still works.
+    let transparent = new Set<number>();
+    try {
+      transparent = (await this.ensureBlockInfo()).transparent;
+    } catch (e) {
+      console.warn('[VoxelModelLoader] Block info load failed; treating all blocks as opaque.', e);
     }
 
     // TEXTURE tier: ensure the block atlas + tile map is loaded; fall back to COLOR on failure.
@@ -300,25 +354,27 @@ export class VoxelModelLoader {
         this.voxelBufferCache.set(entityId, buffer);
       }
 
-      return this.parseBinaryVoxelShell(buffer, scale, mode, atlas);
+      return this.parseBinaryVoxelShell(buffer, scale, mode, atlas, transparent);
     } catch (e) {
       console.warn(`[VoxelModelLoader] Could not load voxel data for ${entityId}. Falling back to procedural model.`, e);
       const fallbackBuffer = this.getProceduralVoxelBuffer(type);
       // Procedural blocks have no real type, so texture can't apply; use color colors.
-      return this.parseBinaryVoxelShell(fallbackBuffer, scale, mode === 'TEXTURE' ? 'COLOR' : mode, null);
+      return this.parseBinaryVoxelShell(fallbackBuffer, scale, mode === 'TEXTURE' ? 'COLOR' : mode, null, new Set());
     }
   }
+
+  // Opacity used for alpha-blended (glass/crystal) blocks.
+  private static readonly TRANSPARENT_OPACITY = 0.45;
 
   private static parseBinaryVoxelShell(
     buffer: ArrayBuffer,
     scale: number = 1.0,
     mode: RenderMode = 'COLOR',
-    atlas: TextureAtlas | null = null
+    atlas: TextureAtlas | null = null,
+    transparent: Set<number> = new Set()
   ): InstancedMesh {
-    const gray = mode === 'GRAY';
-    const textured = mode === 'TEXTURE' && atlas != null;
     const dataView = new DataView(buffer);
-    
+
     // Read starting 12-byte header: min bounds coordinates
     const minX = dataView.getInt32(0, false); // big-endian
     const minY = dataView.getInt32(4, false);
@@ -328,10 +384,60 @@ export class VoxelModelLoader {
     const headerSize = 12;
     const voxelCount = (buffer.byteLength - headerSize) / voxelDataSize;
 
-    console.log(`[VoxelModelLoader] Parsing ${voxelCount} voxels, minBounds=(${minX},${minY},${minZ}), scale=${scale}, mode=${mode}`);
+    // Split into opaque and transparent voxels so each can use its own material.
+    const opaqueVoxels: Voxel[] = [];
+    const transparentVoxels: Voxel[] = [];
+    for (let i = 0; i < voxelCount; i++) {
+      const offset = headerSize + i * voxelDataSize;
+      const v: Voxel = {
+        rx: dataView.getInt16(offset, false),
+        ry: dataView.getInt16(offset + 2, false),
+        rz: dataView.getInt16(offset + 4, false),
+        r: dataView.getUint8(offset + 6),
+        g: dataView.getUint8(offset + 7),
+        b: dataView.getUint8(offset + 8),
+        blockType: dataView.getInt16(offset + 9, false),
+      };
+      (transparent.has(v.blockType) ? transparentVoxels : opaqueVoxels).push(v);
+    }
 
-    // Create the instanced mesh with scaled geometry
-    const scaledGeometry = new BoxGeometry(scale, scale, scale);
+    console.log(`[VoxelModelLoader] Parsing ${voxelCount} voxels (${transparentVoxels.length} transparent), minBounds=(${minX},${minY},${minZ}), scale=${scale}, mode=${mode}`);
+
+    // The opaque shell is the primary mesh; transparent blocks ride along as a child so
+    // they inherit the entity's transform/visibility and draw after the opaque geometry.
+    const mesh = this.buildInstancedMesh(opaqueVoxels, minX, minY, minZ, scale, mode, atlas, false);
+    if (transparentVoxels.length > 0) {
+      const glass = this.buildInstancedMesh(transparentVoxels, minX, minY, minZ, scale, mode, atlas, true);
+      glass.renderOrder = 1; // draw after the opaque sibling
+      glass.userData.baseOpacity = this.TRANSPARENT_OPACITY;
+      mesh.add(glass);
+    }
+
+    // Tag the primary mesh with bounds metadata for bounding operations
+    mesh.userData = {
+      ...mesh.userData,
+      isVoxelMesh: true,
+      minBounds: new Vector3(minX, minY, minZ),
+      voxelCount: voxelCount,
+    };
+
+    return mesh;
+  }
+
+  /** Build one InstancedMesh for a set of voxels sharing a material (opaque or transparent). */
+  private static buildInstancedMesh(
+    voxels: Voxel[],
+    minX: number, minY: number, minZ: number,
+    scale: number,
+    mode: RenderMode,
+    atlas: TextureAtlas | null,
+    transparentLayer: boolean
+  ): InstancedMesh {
+    const gray = mode === 'GRAY';
+    const textured = mode === 'TEXTURE' && atlas != null;
+    const count = voxels.length;
+
+    const geometry = new BoxGeometry(scale, scale, scale);
     let material: MeshStandardMaterial;
     if (textured) {
       material = atlas!.material.clone();
@@ -341,50 +447,31 @@ export class VoxelModelLoader {
     } else {
       material = this.material.clone();
     }
-    const mesh = new InstancedMesh(scaledGeometry, material, voxelCount);
-    mesh.instanceMatrix.setUsage(DynamicDrawUsage);
-
-    // TEXTURE tier: per-instance atlas tile indices for the 6 faces (sides 0-2 / 3-5),
-    // read by the material's vertex shader.
-    let sideA: Float32Array | null = null;
-    let sideB: Float32Array | null = null;
-    if (textured) {
-      sideA = new Float32Array(voxelCount * 3);
-      sideB = new Float32Array(voxelCount * 3);
+    if (transparentLayer) {
+      material.transparent = true;
+      material.opacity = this.TRANSPARENT_OPACITY;
+      material.depthWrite = false; // avoid transparent blocks occluding each other oddly
     }
 
+    const mesh = new InstancedMesh(geometry, material, count);
+    mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+
+    // TEXTURE tier: per-instance atlas tile indices for the 6 faces (sides 0-2 / 3-5).
+    const sideA = textured ? new Float32Array(count * 3) : null;
+    const sideB = textured ? new Float32Array(count * 3) : null;
+
     const dummy = new Object3D();
-    const position = new Vector3();
     const color = new Color();
 
-    for (let i = 0; i < voxelCount; i++) {
-      const offset = headerSize + i * voxelDataSize;
-
-      // Read Packed Voxel: int16 rx, ry, rz, uint8 R, G, B, int16 block type
-      const rx = dataView.getInt16(offset, false);
-      const ry = dataView.getInt16(offset + 2, false);
-      const rz = dataView.getInt16(offset + 4, false);
-      const r = dataView.getUint8(offset + 6);
-      const g = dataView.getUint8(offset + 7);
-      const b = dataView.getUint8(offset + 8);
-      const blockType = dataView.getInt16(offset + 9, false);
-
-      // Compute actual position (centered around origin of local coordinate space)
-      // Apply scale so voxels spread out proportionally
-      position.set(
-        (minX + rx) * scale,
-        (minY + ry) * scale,
-        (minZ + rz) * scale
-      );
-
-      dummy.position.copy(position);
+    for (let i = 0; i < count; i++) {
+      const v = voxels[i];
+      dummy.position.set((minX + v.rx) * scale, (minY + v.ry) * scale, (minZ + v.rz) * scale);
       dummy.updateMatrix();
-
       mesh.setMatrixAt(i, dummy.matrix);
 
       if (textured) {
         // Per-face atlas tiles for this block type (unknown blocks -> tile 0).
-        const six = atlas!.typeTiles.get(blockType);
+        const six = atlas!.typeTiles.get(v.blockType);
         sideA![i * 3] = six ? six[0] : 0;
         sideA![i * 3 + 1] = six ? six[1] : 0;
         sideA![i * 3 + 2] = six ? six[2] : 0;
@@ -394,29 +481,20 @@ export class VoxelModelLoader {
       } else if (gray) {
         mesh.setColorAt(i, GRAY_VOXEL_COLOR);
       } else {
-        color.setRGB(r / 255, g / 255, b / 255, SRGBColorSpace);
+        color.setRGB(v.r / 255, v.g / 255, v.b / 255, SRGBColorSpace);
         mesh.setColorAt(i, color);
       }
     }
 
     if (sideA && sideB) {
-      scaledGeometry.setAttribute('aSideA', new InstancedBufferAttribute(sideA, 3));
-      scaledGeometry.setAttribute('aSideB', new InstancedBufferAttribute(sideB, 3));
+      geometry.setAttribute('aSideA', new InstancedBufferAttribute(sideA, 3));
+      geometry.setAttribute('aSideB', new InstancedBufferAttribute(sideB, 3));
     }
 
-    // Trigger update updates to GPU buffer
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) {
       mesh.instanceColor.needsUpdate = true;
     }
-
-    // Tag the mesh with the bounds metadata for bounding operations
-    mesh.userData = {
-      isVoxelMesh: true,
-      minBounds: new Vector3(minX, minY, minZ),
-      voxelCount: voxelCount
-    };
-
     return mesh;
   }
 }

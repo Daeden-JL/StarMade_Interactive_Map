@@ -350,6 +350,7 @@ export class GalaxyRenderer {
           const voxelMesh = this.entityVoxelMeshes.get(id);
           if (voxelMesh) {
             this.scene.remove(voxelMesh);
+            this.disposeVoxelMeshTree(voxelMesh);
             this.entityVoxelMeshes.delete(id);
           }
         }
@@ -674,10 +675,7 @@ export class GalaxyRenderer {
 
     for (const [id, voxelMesh] of this.entityVoxelMeshes.entries()) {
       this.scene.remove(voxelMesh);
-      voxelMesh.geometry.dispose();
-      const mat = voxelMesh.material;
-      if (Array.isArray(mat)) mat.forEach(m => m.dispose());
-      else (mat as Material).dispose();
+      this.disposeVoxelMeshTree(voxelMesh);
 
       // Restore the entity's marker until the voxel model reloads in the new mode.
       const container = this.entityMeshes.get(id);
@@ -690,6 +688,18 @@ export class GalaxyRenderer {
     this.entityVoxelMeshes.clear();
     this.entityVoxelLoading.clear();
     // handleLevelOfDetail() re-triggers loads for in-range entities on the next frame.
+  }
+
+  // Dispose a voxel mesh and any child layers (e.g. the transparent-block sub-mesh).
+  private disposeVoxelMeshTree(root: Object3D) {
+    root.traverse(obj => {
+      const m = obj as Mesh;
+      if (!m.isMesh) return;
+      m.geometry?.dispose?.();
+      const mat = m.material;
+      if (Array.isArray(mat)) mat.forEach(x => x.dispose());
+      else (mat as Material)?.dispose?.();
+    });
   }
 
   public setCameraMode(mode: CameraMode) {
@@ -1163,6 +1173,15 @@ export class GalaxyRenderer {
           mat.opacity = newOpacity;
           mat.needsUpdate = true;
         }
+        // Fade transparent child layers (e.g. glass) relative to their base opacity.
+        voxelMesh.children.forEach(child => {
+          const cm = (child as Mesh).material as Material;
+          if (cm && 'opacity' in cm) {
+            const base = (child.userData.baseOpacity as number) ?? 1;
+            cm.opacity = newOpacity * base;
+            cm.needsUpdate = true;
+          }
+        });
         voxelMesh.visible = (newOpacity > 0.01) && (voxelMesh.userData.inRange === true);
       }
     }
