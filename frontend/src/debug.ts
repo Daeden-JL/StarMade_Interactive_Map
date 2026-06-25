@@ -92,20 +92,22 @@ function makeLabel(text: string, className: string, y: number): CSS2DObject {
   return obj;
 }
 
-let maxCols = 0;
-SHAPES.forEach((shape, row) => {
-  maxCols = Math.max(maxCols, shape.count);
-  const z = -row * SPACING;
+const COLS = 12; // orientations per visual row before wrapping
+let cellRow = 0;
+SHAPES.forEach((shape) => {
   const geomKey = geometryKeyForStyle(shape.style);
+  const startRow = cellRow;
 
-  // Row label to the left of each row.
-  const rowLabel = makeLabel(shape.name, 'row-label', 0.6);
-  rowLabel.position.set(-SPACING * 1.4, 0.6, z);
+  // Shape name label at the left of the shape's first row.
+  const rowLabel = makeLabel(shape.name, 'row-label', 0.7);
+  rowLabel.position.set(-SPACING * 1.5, 0.7, -startRow * SPACING);
   scene.add(rowLabel);
 
   for (let o = 0; o < shape.count; o++) {
+    const col = o % COLS;
+    const sub = Math.floor(o / COLS);
     const cell = new Group();
-    cell.position.set(o * SPACING, 0, z);
+    cell.position.set(col * SPACING, 0, -(startRow + sub) * SPACING);
 
     const status = statusFor(shape.style, o);
     const material = new MeshStandardMaterial({
@@ -132,13 +134,17 @@ SHAPES.forEach((shape, row) => {
 
     scene.add(cell);
   }
+
+  cellRow = startRow + Math.ceil(shape.count / COLS) + 1; // blank row between shapes
 });
 
 // Frame the whole grid.
-const cx = ((maxCols - 1) * SPACING) / 2;
-const cz = -((SHAPES.length - 1) * SPACING) / 2;
+const totalRows = cellRow;
+const gridW = COLS * SPACING;
+const cx = ((COLS - 1) * SPACING) / 2;
+const cz = -((totalRows - 1) * SPACING) / 2;
 controls.target.set(cx, 0, cz);
-camera.position.set(cx, Math.max(18, maxCols * 0.9), cz + Math.max(26, maxCols * 1.3));
+camera.position.set(cx, gridW * 0.85, cz + gridW * 0.6);
 controls.update();
 
 window.addEventListener('resize', () => {
