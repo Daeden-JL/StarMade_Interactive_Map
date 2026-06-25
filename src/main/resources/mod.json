@@ -2,7 +2,7 @@
   "name": "StarMade_Interactive_Map",
   "author": "Daeden",
   "description": "An interactive 3D galaxy map for StarMade with real-time tracking, custom fly/orbit cameras, and blueprint controls.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "starmade_version": "0.202.000",
   "client_mod": false,
   "server_mod": true,
