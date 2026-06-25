@@ -27,9 +27,9 @@ client — think BlueMap, but for StarMade's galaxy.
 
 Planned features:
 
-- **Fix partial blocks** — correct rendering of non-full blocks (wedges, corners, tetras, heptas),
-  which currently render as full cubes. Needs per-instance orientation in the voxel stream plus
-  per-shape geometry on the client.
+- **Partial block orientation** — non-full blocks (wedges, corners, tetras, heptas) now render with
+  their own geometry, but all share a single default orientation. Remaining work: map StarMade's
+  per-instance orientation byte to the correct rotation per shape (being tuned against real ships).
 
 Recently shipped:
 

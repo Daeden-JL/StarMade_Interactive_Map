@@ -46,7 +46,8 @@ public class VoxelMeshOptimizer {
             for (int x = minBlockX; x <= maxBlockX; x++) {
                 for (int y = minBlockY; y <= maxBlockY; y++) {
                     for (int z = minBlockZ; z <= maxBlockZ; z++) {
-                        short blockId = getBlockId(controller, x, y, z);
+                        SegmentPiece piece = getPiece(controller, x, y, z);
+                        short blockId = (piece == null || piece.isDead()) ? 0 : piece.getType();
                         if (blockId == 0) {
                             continue; // Air block, skip
                         }
@@ -54,12 +55,15 @@ public class VoxelMeshOptimizer {
                         // Voxel is visible if at least one of its 6 faces is exposed to air/empty space
                         if (isExposed(controller, x, y, z)) {
                             // Pack voxel: relative coords (3x int16) + block RGB (3x uint8)
-                            // + block type id (int16) = 11 bytes. The type id lets the client
-                            // look up the block's texture tile in TEXTURE render mode.
+                            // + block type id (int16) + orientation (uint8) = 12 bytes. The type id
+                            // lets the client pick the texture tile and block shape; the orientation
+                            // byte lets it rotate non-cube shapes (wedges/corners/etc.).
                             short rx = (short) (x - minBlockX);
                             short ry = (short) (y - minBlockY);
                             short rz = (short) (z - minBlockZ);
                             int rgb = BlockColorResolver.resolve(blockId);
+                            byte orientation = 0;
+                            try { orientation = piece.getOrientation(); } catch (Throwable t) { /* default 0 */ }
 
                             dos.writeShort(rx);
                             dos.writeShort(ry);
@@ -68,6 +72,7 @@ public class VoxelMeshOptimizer {
                             dos.writeByte((rgb >> 8) & 0xFF);  // G
                             dos.writeByte(rgb & 0xFF);         // B
                             dos.writeShort(blockId);           // block type id
+                            dos.writeByte(orientation);        // block orientation
                         }
                     }
                 }
@@ -81,14 +86,18 @@ public class VoxelMeshOptimizer {
     }
 
     private static short getBlockId(VoxelEntity controller, int x, int y, int z) {
-        if (controller.getSegmentBuffer() == null) {
-            return 0;
-        }
-        SegmentPiece piece = controller.getSegmentBuffer().getPointUnsave(x, y, z);
+        SegmentPiece piece = getPiece(controller, x, y, z);
         if (piece == null || piece.isDead()) {
             return 0;
         }
         return piece.getType();
+    }
+
+    private static SegmentPiece getPiece(VoxelEntity controller, int x, int y, int z) {
+        if (controller.getSegmentBuffer() == null) {
+            return null;
+        }
+        return controller.getSegmentBuffer().getPointUnsave(x, y, z);
     }
 
     private static boolean isExposed(VoxelEntity controller, int x, int y, int z) {

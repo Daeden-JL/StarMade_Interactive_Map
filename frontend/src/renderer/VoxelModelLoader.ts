@@ -1,16 +1,18 @@
 import {
-  BoxGeometry,
   CanvasTexture,
   Color,
+  DoubleSide,
   DynamicDrawUsage,
   InstancedBufferAttribute,
   InstancedMesh,
   MeshStandardMaterial,
   NearestFilter,
   Object3D,
+  Quaternion,
   SRGBColorSpace,
   Vector3
 } from 'three';
+import { buildBlockGeometry, geometryKeyForStyle, isCustomShape, orientationQuaternion } from './blockGeometry.ts';
 
 /**
  * Ship/station render tiers, lightest to heaviest:
@@ -46,6 +48,7 @@ interface BlockInfo {
   tilesPerPage: number;
   typeTiles: Map<number, number[]>;     // block type id -> 6 side atlas tile indices
   transparent: Set<number>;             // block type ids that render with alpha blending
+  styles: Map<number, number>;          // block type id -> BlockStyle ordinal (shape)
 }
 
 // One decoded voxel record.
@@ -53,6 +56,7 @@ interface Voxel {
   rx: number; ry: number; rz: number;
   r: number; g: number; b: number;
   blockType: number;
+  orientation: number;
 }
 
 export class VoxelModelLoader {
@@ -100,7 +104,12 @@ export class VoxelModelLoader {
           for (const t of meta.transparentTypes) transparent.add(t);
         }
 
-        return { tileSize, tilesPerRow, tilesPerPage, typeTiles, transparent };
+        const styles = new Map<number, number>();
+        if (meta.styles) {
+          for (const k in meta.styles) styles.set(parseInt(k, 10), meta.styles[k]);
+        }
+
+        return { tileSize, tilesPerRow, tilesPerPage, typeTiles, transparent, styles };
       })();
     }
     return this.blockInfoPromise;
@@ -273,8 +282,9 @@ export class VoxelModelLoader {
     });
 
     const N = voxels.length;
-    // 11 bytes/voxel: 3x int16 position + 3x uint8 RGB + 1x int16 block type (0 here).
-    const buffer = new ArrayBuffer(12 + N * 11);
+    // 12 bytes/voxel: 3x int16 position + 3x uint8 RGB + 1x int16 block type + 1x uint8
+    // orientation. Matches the real server output so the same parser handles both.
+    const buffer = new ArrayBuffer(12 + N * 12);
     const dataView = new DataView(buffer);
 
     dataView.setInt32(0, minX, false);
@@ -283,7 +293,7 @@ export class VoxelModelLoader {
 
     for (let i = 0; i < N; i++) {
       const v = voxels[i];
-      const offset = 12 + i * 11;
+      const offset = 12 + i * 12;
       dataView.setInt16(offset, v.rx, false);
       dataView.setInt16(offset + 2, v.ry, false);
       dataView.setInt16(offset + 4, v.rz, false);
@@ -292,6 +302,7 @@ export class VoxelModelLoader {
       dataView.setUint8(offset + 7, g);
       dataView.setUint8(offset + 8, b);
       dataView.setInt16(offset + 9, 0, false); // procedural blocks have no real type
+      dataView.setUint8(offset + 11, 0);        // procedural blocks are unoriented cubes
     }
 
     this.fallbackCache.set(type, buffer);
@@ -316,16 +327,19 @@ export class VoxelModelLoader {
 
     // GENERIC tier: skip the network entirely and render the procedural placeholder.
     if (mode === 'GENERIC') {
-      return this.parseBinaryVoxelShell(this.getProceduralVoxelBuffer(type), scale, 'COLOR', null, new Set());
+      return this.parseBinaryVoxelShell(this.getProceduralVoxelBuffer(type), scale, 'COLOR', null, new Set(), new Map());
     }
 
-    // Per-type metadata (which block types are transparent). Best-effort: if it fails
-    // (e.g. an older server), treat everything as opaque so rendering still works.
+    // Per-type metadata (transparency + shape). Best-effort: if it fails (e.g. an older
+    // server), treat everything as opaque cubes so rendering still works.
     let transparent = new Set<number>();
+    let styles = new Map<number, number>();
     try {
-      transparent = (await this.ensureBlockInfo()).transparent;
+      const info = await this.ensureBlockInfo();
+      transparent = info.transparent;
+      styles = info.styles;
     } catch (e) {
-      console.warn('[VoxelModelLoader] Block info load failed; treating all blocks as opaque.', e);
+      console.warn('[VoxelModelLoader] Block info load failed; treating all blocks as opaque cubes.', e);
     }
 
     // TEXTURE tier: ensure the block atlas + tile map is loaded; fall back to COLOR on failure.
@@ -354,12 +368,12 @@ export class VoxelModelLoader {
         this.voxelBufferCache.set(entityId, buffer);
       }
 
-      return this.parseBinaryVoxelShell(buffer, scale, mode, atlas, transparent);
+      return this.parseBinaryVoxelShell(buffer, scale, mode, atlas, transparent, styles);
     } catch (e) {
       console.warn(`[VoxelModelLoader] Could not load voxel data for ${entityId}. Falling back to procedural model.`, e);
       const fallbackBuffer = this.getProceduralVoxelBuffer(type);
       // Procedural blocks have no real type, so texture can't apply; use color colors.
-      return this.parseBinaryVoxelShell(fallbackBuffer, scale, mode === 'TEXTURE' ? 'COLOR' : mode, null, new Set());
+      return this.parseBinaryVoxelShell(fallbackBuffer, scale, mode === 'TEXTURE' ? 'COLOR' : mode, null, new Set(), new Map());
     }
   }
 
@@ -371,7 +385,8 @@ export class VoxelModelLoader {
     scale: number = 1.0,
     mode: RenderMode = 'COLOR',
     atlas: TextureAtlas | null = null,
-    transparent: Set<number> = new Set()
+    transparent: Set<number> = new Set(),
+    styles: Map<number, number> = new Map()
   ): InstancedMesh {
     const dataView = new DataView(buffer);
 
@@ -380,7 +395,7 @@ export class VoxelModelLoader {
     const minY = dataView.getInt32(4, false);
     const minZ = dataView.getInt32(8, false);
 
-    const voxelDataSize = 11; // 11 bytes/voxel: 3x int16 pos + 3x uint8 RGB + 1x int16 block type
+    const voxelDataSize = 12; // 3x int16 pos + 3x uint8 RGB + 1x int16 block type + 1x uint8 orientation
     const headerSize = 12;
     const voxelCount = (buffer.byteLength - headerSize) / voxelDataSize;
 
@@ -397,18 +412,28 @@ export class VoxelModelLoader {
         g: dataView.getUint8(offset + 7),
         b: dataView.getUint8(offset + 8),
         blockType: dataView.getInt16(offset + 9, false),
+        orientation: dataView.getUint8(offset + 11),
       };
       (transparent.has(v.blockType) ? transparentVoxels : opaqueVoxels).push(v);
     }
 
     console.log(`[VoxelModelLoader] Parsing ${voxelCount} voxels (${transparentVoxels.length} transparent), minBounds=(${minX},${minY},${minZ}), scale=${scale}, mode=${mode}`);
 
-    // The opaque shell is the primary mesh; transparent blocks ride along as a child so
-    // they inherit the entity's transform/visibility and draw after the opaque geometry.
-    const mesh = this.buildInstancedMesh(opaqueVoxels, minX, minY, minZ, scale, mode, atlas, false);
-    if (transparentVoxels.length > 0) {
-      const glass = this.buildInstancedMesh(transparentVoxels, minX, minY, minZ, scale, mode, atlas, true);
-      glass.renderOrder = 1; // draw after the opaque sibling
+    // Group each layer by block shape; one InstancedMesh per shape (a mesh can only use
+    // one geometry). The opaque cube shell is the primary mesh and every other shape /
+    // the transparent blocks ride along as children, inheriting its transform/visibility.
+    const opaqueGroups = this.groupByGeometry(opaqueVoxels, styles);
+    const transparentGroups = this.groupByGeometry(transparentVoxels, styles);
+
+    const mesh = this.buildInstancedMesh(opaqueGroups.get('cube') ?? [], 'cube', minX, minY, minZ, scale, mode, atlas, false, styles);
+
+    for (const [key, group] of opaqueGroups) {
+      if (key === 'cube') continue;
+      mesh.add(this.buildInstancedMesh(group, key, minX, minY, minZ, scale, mode, atlas, false, styles));
+    }
+    for (const [key, group] of transparentGroups) {
+      const glass = this.buildInstancedMesh(group, key, minX, minY, minZ, scale, mode, atlas, true, styles);
+      glass.renderOrder = 1; // draw after opaque siblings
       glass.userData.baseOpacity = this.TRANSPARENT_OPACITY;
       mesh.add(glass);
     }
@@ -424,20 +449,34 @@ export class VoxelModelLoader {
     return mesh;
   }
 
-  /** Build one InstancedMesh for a set of voxels sharing a material (opaque or transparent). */
+  /** Partition voxels by the geometry their block shape needs (cube/wedge/corner/...). */
+  private static groupByGeometry(voxels: Voxel[], styles: Map<number, number>): Map<string, Voxel[]> {
+    const groups = new Map<string, Voxel[]>();
+    for (const v of voxels) {
+      const key = geometryKeyForStyle(styles.get(v.blockType) ?? 0);
+      let arr = groups.get(key);
+      if (!arr) { arr = []; groups.set(key, arr); }
+      arr.push(v);
+    }
+    return groups;
+  }
+
+  /** Build one InstancedMesh for voxels of a single shape sharing a material. */
   private static buildInstancedMesh(
     voxels: Voxel[],
+    geomKey: string,
     minX: number, minY: number, minZ: number,
     scale: number,
     mode: RenderMode,
     atlas: TextureAtlas | null,
-    transparentLayer: boolean
+    transparentLayer: boolean,
+    styles: Map<number, number>
   ): InstancedMesh {
     const gray = mode === 'GRAY';
     const textured = mode === 'TEXTURE' && atlas != null;
     const count = voxels.length;
 
-    const geometry = new BoxGeometry(scale, scale, scale);
+    const geometry = buildBlockGeometry(geomKey, scale);
     let material: MeshStandardMaterial;
     if (textured) {
       material = atlas!.material.clone();
@@ -447,6 +486,8 @@ export class VoxelModelLoader {
     } else {
       material = this.material.clone();
     }
+    // Custom shapes don't guarantee outward winding; render both sides so no face vanishes.
+    if (isCustomShape(geomKey)) material.side = DoubleSide;
     if (transparentLayer) {
       material.transparent = true;
       material.opacity = this.TRANSPARENT_OPACITY;
@@ -462,10 +503,13 @@ export class VoxelModelLoader {
 
     const dummy = new Object3D();
     const color = new Color();
+    const quat = new Quaternion();
 
     for (let i = 0; i < count; i++) {
       const v = voxels[i];
+      const style = styles.get(v.blockType) ?? 0;
       dummy.position.set((minX + v.rx) * scale, (minY + v.ry) * scale, (minZ + v.rz) * scale);
+      dummy.quaternion.copy(orientationQuaternion(style, v.orientation, quat));
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 

@@ -869,6 +869,9 @@ public class MapWebServer {
             // Block type ids that render with alpha blending (glass, crystal, etc.) so the
             // client can draw them transparently.
             java.util.List<Short> transparentTypes = new java.util.ArrayList<>();
+            // Block shape per type (StarMade BlockStyle ordinal: 0=NORMAL 1=WEDGE 2=CORNER
+            // 3=SPRITE 4=TETRA 5=HEPTA 6=NORMAL24) so the client can pick the right geometry.
+            Map<String, Integer> styles = new HashMap<>();
             try {
                 org.schema.game.common.data.element.ElementInformation[] arr =
                     org.schema.game.common.data.element.ElementKeyMap.getInfoArray();
@@ -883,6 +886,10 @@ public class MapWebServer {
                         }
                         blocks.put(String.valueOf(id), sides);
                         try { if (info.isBlended()) transparentTypes.add(id); } catch (Throwable t) { /* ignore */ }
+                        try {
+                            org.schema.game.client.view.cubes.shapes.BlockStyle bs = info.getBlockStyle();
+                            if (bs != null) styles.put(String.valueOf(id), bs.ordinal());
+                        } catch (Throwable t) { /* ignore */ }
                     }
                 }
             } catch (Throwable t) {
@@ -890,6 +897,7 @@ public class MapWebServer {
             }
             resp.put("blocks", blocks);
             resp.put("transparentTypes", transparentTypes);
+            resp.put("styles", styles);
             cached = mapper.writeValueAsString(resp);
             blockMetaCache = cached;
         }
