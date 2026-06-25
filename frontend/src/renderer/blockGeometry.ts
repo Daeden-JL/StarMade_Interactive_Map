@@ -69,11 +69,12 @@ const WEDGE_FLOOR_Y_ANGLE = [Math.PI, -Math.PI / 2, 0, Math.PI / 2];
 
 /**
  * Floor tetras (corner pieces sitting on a deck) — orientation bytes 0-3. Confirmed against
- * the HGN-Destroyer bump corners, where each tetra fills the outer corner and slopes up toward
- * the centre. buildTetra()'s canonical solid corner is at (-X,-Y,-Z), matching byte 3 (NW);
- * the rest are rotations about Y: 0 = NE (-90°), 1 = SE (180°), 2 = SW (+90°), 3 = NW (0°).
+ * the HGN-Destroyer bump corners: each tetra's solid mass sits toward the centre with its ramp
+ * facing outward-and-up (matching the surrounding wedges). buildTetra()'s canonical solid corner
+ * is at (-X,-Y,-Z), so the correct rotations are the outer-facing ones plus 180° about Y:
+ *   0 = NE (+90°), 1 = SE (0°), 2 = SW (-90°), 3 = NW (180°).
  */
-const TETRA_FLOOR_Y_ANGLE = [-Math.PI / 2, Math.PI, Math.PI / 2, 0];
+const TETRA_FLOOR_Y_ANGLE = [Math.PI / 2, 0, -Math.PI / 2, Math.PI];
 
 /**
  * Map a block's orientation byte to a rotation for its shape.
