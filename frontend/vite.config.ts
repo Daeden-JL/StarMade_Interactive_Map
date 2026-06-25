@@ -1,4 +1,8 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+const root = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   server: {
@@ -17,6 +21,13 @@ export default defineConfig({
   },
   build: {
     outDir: '../src/main/resources/web',
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        // Main galaxy map and the standalone block-orientation debug page.
+        main: resolve(root, 'index.html'),
+        debug: resolve(root, 'debug.html')
+      }
+    }
   }
 });

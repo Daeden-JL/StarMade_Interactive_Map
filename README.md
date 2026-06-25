@@ -145,6 +145,12 @@ The dev server proxies `/api` and `/ws` to a backend on `localhost:8888` (see `f
 and `WebSocketClient.ts`). Point those at wherever your dev backend is listening, then build into the
 JAR with `npm run build` (or `make build-frontend`) when you're done.
 
+### Block orientation debug page
+
+`/debug.html` renders every block shape (wedge/corner/tetra/hepta) in each orientation byte, using
+the same `blockGeometry` code as the live map, with per-cell axes and a confirmed/hypothesis/unhandled
+color key. It's a diagnostic aid for deriving StarMade's per-shape orientation mappings.
+
 ## Project layout
 
 ```

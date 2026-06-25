@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <title>StarMade Map — Block Orientation Debug</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0a0e14; color: #cfe3ff;
+      font-family: 'Inter', system-ui, sans-serif; overflow: hidden; }
+    #debug-root { position: fixed; inset: 0; }
+    .label-overlay { position: absolute; inset: 0; pointer-events: none; }
+    .cell-label { font: 600 11px/1.2 'Consolas', monospace; text-align: center;
+      white-space: nowrap; text-shadow: 0 0 4px #000; }
+    .row-label { font: 700 14px 'Orbitron', sans-serif; color: #8fd0ff;
+      letter-spacing: 1px; text-shadow: 0 0 6px #000; }
+    #legend { position: fixed; top: 12px; left: 12px; z-index: 10; max-width: 360px;
+      background: rgba(12,18,28,0.86); border: 1px solid #1c3350; border-radius: 8px;
+      padding: 12px 14px; font-size: 12px; line-height: 1.5; }
+    #legend h1 { font: 700 15px 'Orbitron', sans-serif; margin: 0 0 6px; color: #3aa0ff; }
+    #legend .key { display: inline-block; width: 11px; height: 11px; border-radius: 2px;
+      margin-right: 6px; vertical-align: -1px; }
+    #legend .muted { color: #7e93ad; }
+    #legend a { color: #3aa0ff; }
+  </style>
+</head>
+<body>
+  <div id="legend">
+    <h1>Block Orientation Debug</h1>
+    <div>Each cell shows a block shape rendered with one orientation byte, using the map's
+      live <code>blockGeometry</code> code. Per-cell axes: <span style="color:#ff5a5a">X</span> /
+      <span style="color:#5aff7a">Y (up)</span> / <span style="color:#5a9bff">Z</span>.</div>
+    <div style="margin-top:6px">
+      <span class="key" style="background:#3aff7a"></span>confirmed
+      <span class="key" style="background:#ffc14d; margin-left:10px"></span>hypothesis
+      <span class="key" style="background:#ff5a5a; margin-left:10px"></span>unhandled
+    </div>
+    <div class="muted" style="margin-top:6px">Drag to orbit · scroll to zoom · right-drag to pan</div>
+  </div>
+  <div id="debug-root"></div>
+  <script type="module" src="/src/debug.ts"></script>
+</body>
+</html>
